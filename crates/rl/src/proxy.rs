@@ -506,32 +506,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn large_json_bodies_are_truncated_and_flagged() {
-        let engine = FakeEngine::start(
-            StatusCode::OK,
-            json!({"blob": "x".repeat(BODY_CAP + 4096)}),
-            0,
-        )
-        .await;
-        let app = crate::router::<()>(state(
-            vec![worker("w1", &engine.url, RuntimeType::Sglang)],
-            5,
-        ));
-        let resp = app
-            .oneshot(
-                Request::get("/workers/w1/engine/server_info")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = json_body(resp).await;
-        assert_eq!(body["body_truncated"], true);
-        assert!(body["body"].as_str().unwrap().len() <= BODY_CAP);
-    }
-
-    #[tokio::test]
     async fn proxy_marks_only_bodies_over_the_cap() {
         for (extra, truncated) in [(0, false), (1, true)] {
             let payload = Value::String("x".repeat(BODY_CAP - 2 + extra));
@@ -554,16 +528,11 @@ mod tests {
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let outcome = json_body(resp).await;
-            assert_eq!(
-                outcome
-                    .get("body_truncated")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                truncated
-            );
             if truncated {
+                assert_eq!(outcome["body_truncated"], true);
                 assert_eq!(outcome["body"].as_str().unwrap().len(), BODY_CAP);
             } else {
+                assert!(outcome.get("body_truncated").is_none());
                 assert_eq!(outcome["body"], payload);
             }
         }
